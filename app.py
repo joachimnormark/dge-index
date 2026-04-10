@@ -8,6 +8,14 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
+import io
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import SimpleDocTemplate, PageBreak, Spacer, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from PIL import Image
 
 # ============================================================================
 # KONFIGURATION
@@ -20,12 +28,21 @@ REGIONS = {
     'Midt': {'population': 1350000, 'color': '#ff7f0e'},
     'Syd': {'population': 1250000, 'color': '#2ca02c'},
     'Hovedstaden': {'population': 1900000, 'color': '#d62728'},
-    'Sjælland': {'population': 850000, 'color': '#9467bd'}
+    'Sjælland': {'population': 850000, 'color': '#9467bd'},
+    'Øst': {'population': 2750000, 'color': '#8c564b'}  # Kombineret Hovedstaden+Sjælland
 }
 
-REGION_ORDER = ['Nord', 'Midt', 'Syd', 'Hovedstaden', 'Sjælland']
+REGION_ORDER_5 = ['Nord', 'Midt', 'Syd', 'Hovedstaden', 'Sjælland']
+REGION_ORDER_4 = ['Nord', 'Midt', 'Syd', 'Øst']
 
 BASE_REGION = 'Midt'
+
+# Farver til gruppetyper (Tabel 1)
+GROUP_TYPE_COLORS = {
+    'DGE': '#2B6CB0',  # Blå
+    'SUP': '#DC2626',  # Rød
+    'JUN': '#10B981'   # Grøn
+}
 
 # Farver til kategori-visualisering
 CATEGORY_COLORS = {
@@ -80,6 +97,8 @@ def map_region_name(full_name):
         return 'Hovedstaden'
     elif 'sjælland' in name:
         return 'Sjælland'
+    elif 'øst' in name:
+        return 'Øst'
     return None
 
 def standardize_group_type(group_type_str):
@@ -153,7 +172,24 @@ def main():
     
     # FILE UPLOAD
     st.header("Upload datafiler")
-    st.info("📁 Upload 10 Excel-filer: 2 filer per region (groups + meetings)")
+    
+    # Mode selection
+    region_mode = st.radio(
+        "Antal regioner:",
+        options=["5 regioner (Nord, Midt, Syd, Hovedstaden, Sjælland)", 
+                 "4 regioner (Nord, Midt, Syd, Øst)"],
+        index=0
+    )
+    
+    is_5_regions = "5 regioner" in region_mode
+    expected_files = 10 if is_5_regions else 8
+    
+    if is_5_regions:
+        st.info("📁 Upload 10 Excel-filer: 2 filer per region (groups + meetings)")
+        REGION_ORDER = REGION_ORDER_5
+    else:
+        st.info("📁 Upload 8 Excel-filer: 2 filer per region (groups + meetings)")
+        REGION_ORDER = REGION_ORDER_4
     
     uploaded_files = st.file_uploader(
         "Vælg filer",
@@ -161,8 +197,8 @@ def main():
         accept_multiple_files=True
     )
     
-    if len(uploaded_files) < 10:
-        st.warning(f"⚠️ Upload venligst 10 filer. Du har uploadet {len(uploaded_files)}.")
+    if len(uploaded_files) < expected_files:
+        st.warning(f"⚠️ Upload venligst {expected_files} filer. Du har uploadet {len(uploaded_files)}.")
         return
     
     # LOAD DATA
@@ -254,6 +290,7 @@ def main():
     # Lav stacked bar chart
     fig = go.Figure()
     
+    # Reverser rækkefølge: DGE, SUP, JUN
     for gtype in ['DGE', 'SUP', 'JUN']:
         y_values = []
         for region in REGION_ORDER:
@@ -267,7 +304,8 @@ def main():
         fig.add_trace(go.Bar(
             name=gtype,
             x=REGION_ORDER,
-            y=y_values
+            y=y_values,
+            marker_color=GROUP_TYPE_COLORS[gtype]
         ))
     
     fig.update_layout(
@@ -279,6 +317,11 @@ def main():
     )
     
     st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("""
+    **Farveforklaring:**  
+    🔵 DGE | 🔴 SUP | 🟢 JUN
+    """)
     
     # Vis også rå tal
     with st.expander("📋 Se detaljerede tal"):
@@ -293,11 +336,14 @@ def main():
     st.markdown("---")
     
     # ==========================================
-    # TABEL 2: GRUPPESTØRRELSE (%)
+    # TABEL 2A: GRUPPESTØRRELSE - SUP (%)
     # ==========================================
     
-    st.header("📊 Tabel 2: Gruppestørrelse (procentfordeling)")
-    st.caption("Fordeling af gruppers medlemstal")
+    st.header("📊 Tabel 2A: Gruppestørrelse SUP-grupper (procentfordeling)")
+    st.caption("Fordeling af SUP-gruppers medlemstal")
+    
+    # Filtrer kun SUP grupper
+    sup_groups = groups_df[groups_df['Gruppetype_std'] == 'SUP'].copy()
     
     # Kategoriser gruppestørrelse
     def categorize_group_size(n):
@@ -315,22 +361,22 @@ def main():
         else:
             return '14+'
     
-    groups_df['Size_cat'] = groups_df['Antal medlemmer'].apply(categorize_group_size)
+    sup_groups['Size_cat'] = sup_groups['Antal medlemmer'].apply(categorize_group_size)
     
     # Tæl grupper per region og kategori
-    size_dist = groups_df[groups_df['Size_cat'].notna()].groupby(
+    size_dist_sup = sup_groups[sup_groups['Size_cat'].notna()].groupby(
         ['Region_short', 'Size_cat']
     ).size().reset_index(name='Count')
     
     # Beregn procent per region
-    totals = size_dist.groupby('Region_short')['Count'].sum()
-    size_dist['Percent'] = size_dist.apply(
-        lambda row: (row['Count'] / totals[row['Region_short']]) * 100,
+    totals_sup = size_dist_sup.groupby('Region_short')['Count'].sum()
+    size_dist_sup['Percent'] = size_dist_sup.apply(
+        lambda row: (row['Count'] / totals_sup[row['Region_short']]) * 100 if row['Region_short'] in totals_sup else 0,
         axis=1
     )
     
     # Lav 100% stacked bar
-    fig2 = go.Figure()
+    fig2a = go.Figure()
     
     categories = ['0-4', '5-7', '8-10', '11-13', '14+']
     cat_colors = {
@@ -344,21 +390,21 @@ def main():
     for cat in categories:
         y_values = []
         for region in REGION_ORDER:
-            data = size_dist[
-                (size_dist['Region_short'] == region) &
-                (size_dist['Size_cat'] == cat)
+            data = size_dist_sup[
+                (size_dist_sup['Region_short'] == region) &
+                (size_dist_sup['Size_cat'] == cat)
             ]
             val = data['Percent'].values[0] if len(data) > 0 else 0
             y_values.append(val)
         
-        fig2.add_trace(go.Bar(
+        fig2a.add_trace(go.Bar(
             name=f'{cat} medlemmer',
             x=REGION_ORDER,
             y=y_values,
             marker_color=cat_colors[cat]
         ))
     
-    fig2.update_layout(
+    fig2a.update_layout(
         barmode='stack',
         height=500,
         xaxis_title='Region',
@@ -367,7 +413,68 @@ def main():
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2a, use_container_width=True)
+    
+    st.markdown("""
+    **Farveforklaring:**  
+    🔴 0-4 medlemmer | 🟠 5-7 medlemmer | 🟡 8-10 medlemmer | 🟢 11-13 medlemmer | ⚪ 14+ medlemmer
+    """)
+    
+    st.markdown("---")
+    
+    # ==========================================
+    # TABEL 2B: GRUPPESTØRRELSE - DGE+JUN (%)
+    # ==========================================
+    
+    st.header("📊 Tabel 2B: Gruppestørrelse DGE og JUN-grupper (procentfordeling)")
+    st.caption("Fordeling af DGE og JUN-gruppers medlemstal")
+    
+    # Filtrer DGE og JUN grupper
+    dge_jun_groups = groups_df[groups_df['Gruppetype_std'].isin(['DGE', 'JUN'])].copy()
+    dge_jun_groups['Size_cat'] = dge_jun_groups['Antal medlemmer'].apply(categorize_group_size)
+    
+    # Tæl grupper per region og kategori
+    size_dist_dge_jun = dge_jun_groups[dge_jun_groups['Size_cat'].notna()].groupby(
+        ['Region_short', 'Size_cat']
+    ).size().reset_index(name='Count')
+    
+    # Beregn procent per region
+    totals_dge_jun = size_dist_dge_jun.groupby('Region_short')['Count'].sum()
+    size_dist_dge_jun['Percent'] = size_dist_dge_jun.apply(
+        lambda row: (row['Count'] / totals_dge_jun[row['Region_short']]) * 100 if row['Region_short'] in totals_dge_jun else 0,
+        axis=1
+    )
+    
+    # Lav 100% stacked bar
+    fig2b = go.Figure()
+    
+    for cat in categories:
+        y_values = []
+        for region in REGION_ORDER:
+            data = size_dist_dge_jun[
+                (size_dist_dge_jun['Region_short'] == region) &
+                (size_dist_dge_jun['Size_cat'] == cat)
+            ]
+            val = data['Percent'].values[0] if len(data) > 0 else 0
+            y_values.append(val)
+        
+        fig2b.add_trace(go.Bar(
+            name=f'{cat} medlemmer',
+            x=REGION_ORDER,
+            y=y_values,
+            marker_color=cat_colors[cat]
+        ))
+    
+    fig2b.update_layout(
+        barmode='stack',
+        height=500,
+        xaxis_title='Region',
+        yaxis_title='Procent (%)',
+        yaxis=dict(range=[0, 100]),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    st.plotly_chart(fig2b, use_container_width=True)
     
     st.markdown("""
     **Farveforklaring:**  
@@ -639,6 +746,103 @@ def main():
     **Farveforklaring:**  
     🔴 1-2 møder | 🟠 3-4 møder | 🟡 5-6 møder | 🟢 7-8 møder | ⚪ 9+ møder
     """)
+    
+    # ==========================================
+    # PDF DOWNLOAD
+    # ==========================================
+    
+    st.markdown("---")
+    st.header("📥 Download rapport")
+    
+    if st.button("Download som PDF", type="primary"):
+        with st.spinner("Genererer PDF..."):
+            try:
+                # Gem alle figurer
+                all_figures = [
+                    (fig, "Tabel 1: Godkendte møder (indexeret)"),
+                    (fig2a, "Tabel 2A: Gruppestørrelse SUP"),
+                    (fig2b, "Tabel 2B: Gruppestørrelse DGE+JUN"),
+                    (fig3, "Tabel 3: Deltagere SUP"),
+                    (fig4, "Tabel 4: Deltagere DGE+JUN"),
+                    (fig5, "Tabel 5: Møder pr. gruppe")
+                ]
+                
+                pdf_buffer = generate_pdf_with_charts(all_figures, selected_year)
+                
+                st.download_button(
+                    label="⬇️ Download PDF",
+                    data=pdf_buffer,
+                    file_name=f"DGE_Regional_Sammenligning_{selected_year}.pdf",
+                    mime="application/pdf"
+                )
+                
+                st.success("✅ PDF klar til download!")
+            except Exception as e:
+                st.error(f"Fejl ved generering af PDF: {e}")
+
+def generate_pdf_with_charts(all_figures, year):
+    """Generér PDF med alle grafer"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        topMargin=0.5*inch,
+        bottomMargin=0.5*inch,
+        leftMargin=0.5*inch,
+        rightMargin=0.5*inch
+    )
+    
+    story = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=22,
+        textColor='#2B6CB0',
+        spaceAfter=20,
+        alignment=1  # Center
+    )
+    
+    story.append(Paragraph(f"DGE Regional Sammenligning {year}", title_style))
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Tilføj hver graf
+    for fig, title in all_figures:
+        # Lav titel
+        story.append(Paragraph(title, styles['Heading2']))
+        story.append(Spacer(1, 0.1*inch))
+        
+        try:
+            # Konverter Plotly fig til billede
+            img_bytes = fig.to_image(format="png", width=1000, height=500, engine="kaleido")
+            
+            # Gem som temp fil
+            img_buffer = io.BytesIO(img_bytes)
+            img = Image.open(img_buffer)
+            
+            # Resize til at passe på siden
+            img.thumbnail((700, 350), Image.Resampling.LANCZOS)
+            
+            # Gem igen
+            img_buffer2 = io.BytesIO()
+            img.save(img_buffer2, format='PNG')
+            img_buffer2.seek(0)
+            
+            # Brug ImageReader
+            from reportlab.platypus import Image as RLImage
+            rl_img = RLImage(img_buffer2, width=7*inch, height=3.5*inch)
+            story.append(rl_img)
+            
+        except Exception as e:
+            story.append(Paragraph(f"Kunne ikke inkludere graf: {e}", styles['Normal']))
+        
+        story.append(PageBreak())
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 if __name__ == "__main__":
     main()
