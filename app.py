@@ -747,12 +747,152 @@ def main():
     🔴 1-2 møder | 🟠 3-4 møder | 🟡 5-6 møder | 🟢 7-8 møder | ⚪ 9+ møder
     """)
     
+    st.markdown("---")
+    
     # ==========================================
-    # PDF DOWNLOAD
+    # TABEL 6: AKTIVE GRUPPER UDEN GODKENDTE MØDER
     # ==========================================
     
+    st.header("📊 Tabel 6: Aktive grupper uden godkendte møder")
+    st.caption("Antal grupper med status 'aktiv' der ikke har holdt godkendte møder i perioden")
+    
+    # Find aktive grupper
+    active_groups = groups_df[
+        (groups_df['Status'].astype(str).str.strip().str.lower() == 'aktiv') |
+        (groups_df['Status'].astype(str).str.strip().str.lower() == 'active')
+    ].copy()
+    
+    # Find hvilke grupper der HAR godkendte møder
+    if 'Gruppe ID' in meetings_with_type.columns:
+        groups_with_meetings = meetings_with_type['Gruppe ID'].unique()
+        active_groups['Has_meetings'] = active_groups['Gruppe ID'].isin(groups_with_meetings)
+    else:
+        groups_with_meetings_names = meetings_with_type['Gruppenavn'].unique()
+        active_groups['Has_meetings'] = active_groups['Gruppenavn'].isin(groups_with_meetings_names)
+    
+    # Filtrer grupper UDEN møder
+    groups_without_meetings = active_groups[~active_groups['Has_meetings']].copy()
+    
+    # Tæl per region og gruppetype
+    no_meetings_counts = groups_without_meetings.groupby(
+        ['Region_short', 'Gruppetype_std']
+    ).size().reset_index(name='Antal')
+    
+    # Lav stacked bar chart (ikke indexeret)
+    fig6 = go.Figure()
+    
+    for gtype in ['DGE', 'SUP', 'JUN']:
+        y_values = []
+        for region in REGION_ORDER:
+            data = no_meetings_counts[
+                (no_meetings_counts['Region_short'] == region) &
+                (no_meetings_counts['Gruppetype_std'] == gtype)
+            ]
+            val = data['Antal'].values[0] if len(data) > 0 else 0
+            y_values.append(val)
+        
+        fig6.add_trace(go.Bar(
+            name=gtype,
+            x=REGION_ORDER,
+            y=y_values,
+            marker_color=GROUP_TYPE_COLORS[gtype]
+        ))
+    
+    fig6.update_layout(
+        barmode='stack',
+        height=500,
+        xaxis_title='Region',
+        yaxis_title='Antal grupper',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    st.plotly_chart(fig6, use_container_width=True)
+    
+    st.markdown("""
+    **Farveforklaring:**  
+    🔵 DGE | 🔴 SUP | 🟢 JUN
+    """)
+    
+    # Vis også rå tal
+    with st.expander("📋 Se detaljerede tal"):
+        pivot_no_meetings = no_meetings_counts.pivot_table(
+            index='Region_short',
+            columns='Gruppetype_std',
+            values='Antal',
+            fill_value=0
+        )
+        st.dataframe(pivot_no_meetings, use_container_width=True)
+    
     st.markdown("---")
-    st.header("📥 Download rapport")
+    
+    # ==========================================
+    # TABEL 7: GRUPPER DER KUN HAR HOLDT SGE-MODUL MØDER
+    # ==========================================
+    
+    st.header("📊 Tabel 7: Grupper med udelukkende SGE-modul møder")
+    st.caption("Aktive grupper der kun har holdt møder af typen 'SGE-modul' i perioden")
+    
+    # Find alle møder per gruppe (både godkendte og ikke-godkendte)
+    if 'Mødetype' in meetings_period.columns:
+        # Identificer nøgle-kolonne
+        if 'Gruppe ID' in meetings_period.columns:
+            group_key = 'Gruppe ID'
+        else:
+            group_key = 'Gruppenavn'
+        
+        # Tæl mødetyper per gruppe
+        meeting_types_per_group = meetings_period.groupby([group_key, 'Region_short', 'Mødetype']).size().reset_index(name='Count')
+        
+        # Find grupper der KUN har SGE-modul møder
+        groups_with_any_meetings = meeting_types_per_group.groupby([group_key, 'Region_short'])['Mødetype'].apply(list).reset_index()
+        
+        sge_only_groups = []
+        for _, row in groups_with_any_meetings.iterrows():
+            meeting_types = row['Mødetype']
+            # Tjek om ALLE møder er SGE-modul
+            all_sge = all('sge' in str(mt).lower() and 'modul' in str(mt).lower() for mt in meeting_types)
+            
+            if all_sge and len(meeting_types) > 0:
+                # Tjek at gruppen er aktiv
+                if group_key == 'Gruppe ID':
+                    group_info = active_groups[active_groups['Gruppe ID'] == row[group_key]]
+                else:
+                    group_info = active_groups[
+                        (active_groups['Gruppenavn'] == row[group_key]) &
+                        (active_groups['Region_short'] == row['Region_short'])
+                    ]
+                
+                if not group_info.empty:
+                    # Tæl antal SGE-modul møder
+                    sge_count = meeting_types_per_group[
+                        (meeting_types_per_group[group_key] == row[group_key]) &
+                        (meeting_types_per_group['Region_short'] == row['Region_short']) &
+                        (meeting_types_per_group['Mødetype'].astype(str).str.lower().str.contains('sge')) &
+                        (meeting_types_per_group['Mødetype'].astype(str).str.lower().str.contains('modul'))
+                    ]['Count'].sum()
+                    
+                    gruppenavn = group_info['Gruppenavn'].values[0]
+                    
+                    sge_only_groups.append({
+                        'Region': row['Region_short'],
+                        'Gruppenavn': gruppenavn,
+                        'Antal SGE-modul møder': int(sge_count)
+                    })
+        
+        if sge_only_groups:
+            sge_df = pd.DataFrame(sge_only_groups)
+            
+            # Sorter efter region (samme rækkefølge som REGION_ORDER)
+            sge_df['Region'] = pd.Categorical(sge_df['Region'], categories=REGION_ORDER, ordered=True)
+            sge_df = sge_df.sort_values('Region')
+            
+            st.dataframe(sge_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Ingen grupper har udelukkende afholdt SGE-møder i perioden")
+    else:
+        st.warning("Mødetype-kolonne ikke fundet i data")
+    
+    st.markdown("---")
     
     if st.button("Download som PDF", type="primary"):
         with st.spinner("Genererer PDF..."):
@@ -764,7 +904,8 @@ def main():
                     (fig2b, "Tabel 2B: Gruppestørrelse DGE+JUN"),
                     (fig3, "Tabel 3: Deltagere SUP"),
                     (fig4, "Tabel 4: Deltagere DGE+JUN"),
-                    (fig5, "Tabel 5: Møder pr. gruppe")
+                    (fig5, "Tabel 5: Møder pr. gruppe"),
+                    (fig6, "Tabel 6: Aktive grupper uden godkendte møder")
                 ]
                 
                 pdf_buffer = generate_pdf_with_charts(all_figures, selected_year)
