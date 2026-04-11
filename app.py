@@ -9,13 +9,6 @@ import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
 import io
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
-from reportlab.platypus import SimpleDocTemplate, PageBreak, Spacer, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from PIL import Image
 
 # ============================================================================
 # KONFIGURATION
@@ -893,97 +886,71 @@ def main():
         st.warning("Mødetype-kolonne ikke fundet i data")
     
     st.markdown("---")
+    st.header("📥 Download rapport")
     
-    if st.button("Download som PDF", type="primary"):
-        with st.spinner("Genererer PDF..."):
-            try:
-                # Gem alle figurer
-                all_figures = [
-                    (fig, "Tabel 1: Godkendte møder (indexeret)"),
-                    (fig2a, "Tabel 2A: Gruppestørrelse SUP"),
-                    (fig2b, "Tabel 2B: Gruppestørrelse DGE+JUN"),
-                    (fig3, "Tabel 3: Deltagere SUP"),
-                    (fig4, "Tabel 4: Deltagere DGE+JUN"),
-                    (fig5, "Tabel 5: Møder pr. gruppe"),
-                    (fig6, "Tabel 6: Aktive grupper uden godkendte møder")
+    col_html, col_excel = st.columns(2)
+    
+    with col_html:
+        st.subheader("📊 Grafer (HTML)")
+        
+        if st.button("Download grafer", type="primary"):
+            import zipfile
+            
+            zip_buffer = io.BytesIO()
+            
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                charts_to_export = [
+                    (fig, "tabel_1_moeder.html"),
+                    (fig2a, "tabel_2a_sup.html"),
+                    (fig2b, "tabel_2b_dge_jun.html"),
+                    (fig3, "tabel_3_deltagere_sup.html"),
+                    (fig4, "tabel_4_deltagere_dge_jun.html"),
+                    (fig5, "tabel_5_moeder_pr_gruppe.html"),
+                    (fig6, "tabel_6_uden_moeder.html")
                 ]
                 
-                pdf_buffer = generate_pdf_with_charts(all_figures, selected_year)
-                
-                st.download_button(
-                    label="⬇️ Download PDF",
-                    data=pdf_buffer,
-                    file_name=f"DGE_Regional_Sammenligning_{selected_year}.pdf",
-                    mime="application/pdf"
-                )
-                
-                st.success("✅ PDF klar til download!")
-            except Exception as e:
-                st.error(f"Fejl ved generering af PDF: {e}")
+                for idx, (chart_fig, filename) in enumerate(charts_to_export, 1):
+                    html_str = chart_fig.to_html(include_plotlyjs='cdn')
+                    zipf.writestr(filename, html_str)
+            
+            zip_buffer.seek(0)
+            
+            st.download_button(
+                label="⬇️ Download ZIP",
+                data=zip_buffer,
+                file_name=f"DGE_Grafer_{selected_year}.zip",
+                mime="application/zip"
+            )
+    
+    with col_excel:
+        st.subheader("📊 Data (Excel)")
+        
+        if st.button("Download data", type="secondary"):
+            excel_buffer = io.BytesIO()
+            
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                meeting_counts.to_excel(writer, sheet_name='T1-Møder', index=False)
+                size_dist_sup.to_excel(writer, sheet_name='T2A-SUP', index=False)
+                size_dist_dge_jun.to_excel(writer, sheet_name='T2B-DGE+JUN', index=False)
+                sup_dist.to_excel(writer, sheet_name='T3-Deltagere SUP', index=False)
+                dge_dist.to_excel(writer, sheet_name='T4-Deltagere DGE+JUN', index=False)
+                meeting_freq_dist.to_excel(writer, sheet_name='T5-Møder pr gruppe', index=False)
+                no_meetings_counts.to_excel(writer, sheet_name='T6-Uden møder', index=False)
+                if sge_only_groups:
+                    sge_df.to_excel(writer, sheet_name='T7-SGE-modul', index=False)
+            
+            excel_buffer.seek(0)
+            
+            st.download_button(
+                label="⬇️ Download Excel",
+                data=excel_buffer,
+                file_name=f"DGE_Data_{selected_year}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 def generate_pdf_with_charts(all_figures, year):
-    """Generér PDF med alle grafer"""
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(A4),
-        topMargin=0.5*inch,
-        bottomMargin=0.5*inch,
-        leftMargin=0.5*inch,
-        rightMargin=0.5*inch
-    )
-    
-    story = []
-    styles = getSampleStyleSheet()
-    
-    # Title
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=22,
-        textColor='#2B6CB0',
-        spaceAfter=20,
-        alignment=1  # Center
-    )
-    
-    story.append(Paragraph(f"DGE Regional Sammenligning {year}", title_style))
-    story.append(Spacer(1, 0.3*inch))
-    
-    # Tilføj hver graf
-    for fig, title in all_figures:
-        # Lav titel
-        story.append(Paragraph(title, styles['Heading2']))
-        story.append(Spacer(1, 0.1*inch))
-        
-        try:
-            # Konverter Plotly fig til billede
-            img_bytes = fig.to_image(format="png", width=1000, height=500, engine="kaleido")
-            
-            # Gem som temp fil
-            img_buffer = io.BytesIO(img_bytes)
-            img = Image.open(img_buffer)
-            
-            # Resize til at passe på siden
-            img.thumbnail((700, 350), Image.Resampling.LANCZOS)
-            
-            # Gem igen
-            img_buffer2 = io.BytesIO()
-            img.save(img_buffer2, format='PNG')
-            img_buffer2.seek(0)
-            
-            # Brug ImageReader
-            from reportlab.platypus import Image as RLImage
-            rl_img = RLImage(img_buffer2, width=7*inch, height=3.5*inch)
-            story.append(rl_img)
-            
-        except Exception as e:
-            story.append(Paragraph(f"Kunne ikke inkludere graf: {e}", styles['Normal']))
-        
-        story.append(PageBreak())
-    
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
+    """DEPRECATED - Kaleido virker ikke på Streamlit Cloud"""
+    pass
 
 if __name__ == "__main__":
     main()

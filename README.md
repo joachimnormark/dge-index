@@ -1,77 +1,33 @@
-# DGE Regional Sammenligning v2.0
+# DGE Regional Sammenligning v2.2
 
 Streamlit app til sammenligning af DGE mødeaktivitet på tværs af danske regioner.
 
-## 🆕 Nyt i v2.0
+## 🆕 Nyt i v2.2
 
-- ✅ Support for både 4 og 5 regioner
-- ✅ Tabel 2 splittet i SUP vs DGE+JUN
-- ✅ Nye farver i Tabel 1 (blå/rød/grøn)
-- ✅ PDF download med alle grafer
-- ✅ Forbedrede forklaringer
+- ✅ **Fixed**: PDF download virker nu (ingen Kaleido/Chrome krav)
+- ✅ **Download grafer**: 7 interaktive HTML-filer i ZIP
+- ✅ **Download data**: Alle tal som Excel fil
+- ✅ **Simplere deployment**: Færre dependencies
 
-## Installation
+## Sådan downloader du
 
-### Option 1: Streamlit Cloud (anbefalet)
-1. Opret GitHub repository
-2. Upload `app.py` og `requirements.txt`
-3. Gå til [share.streamlit.io](https://share.streamlit.io)
-4. Klik "New app"
-5. Vælg dit repo og `app.py`
-6. Deploy!
+### 📊 Grafer (HTML-format)
+1. Klik "Download grafer"
+2. Modtag ZIP-fil med 7 HTML-filer
+3. Udpak og åbn i browser
+4. Interaktive grafer med zoom, hover, osv.
 
-### Option 2: Lokal
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+### 📊 Data (Excel-format)
+1. Klik "Download data"
+2. Modtag Excel-fil med 8 ark
+3. Åbn i Excel/Google Sheets
+4. Lav dine egne analyser
 
-## Brug
-
-### 1. Vælg mode
-- **5 regioner**: Upload 10 filer (Nord, Midt, Syd, Hovedstaden, Sjælland)
-- **4 regioner**: Upload 8 filer (Nord, Midt, Syd, Øst)
-
-### 2. Upload filer
-**5-region mode (10 filer):**
-- 2 filer for Nord (groups + meetings)
-- 2 filer for Midt (groups + meetings)
-- 2 filer for Syd (groups + meetings)
-- 2 filer for Hovedstaden (groups + meetings)
-- 2 filer for Sjælland (groups + meetings)
-
-**4-region mode (8 filer):**
-- 2 filer for Nord (groups + meetings)
-- 2 filer for Midt (groups + meetings)
-- 2 filer for Syd (groups + meetings)
-- 2 filer for Øst (groups + meetings)
-
-### 3. Vælg år
-Vælg hvilket år der skal analyseres (2020-2025)
-
-### 4. Se analyser
-6 tabeller genereres automatisk
-
-### 5. Download PDF
-Klik "Download som PDF" for at få alle grafer som PDF
-
-## Indbyggertal
-
-| Region | Indbyggere | Index base |
-|--------|------------|------------|
-| Nord (Nordjylland) | 600.000 | - |
-| **Midt (Midtjylland)** | **1.350.000** | **100** |
-| Syd (Syddanmark) | 1.250.000 | - |
-| Hovedstaden | 1.900.000 | - |
-| Sjælland | 850.000 | - |
-| Øst (Hovedstaden + Sjælland) | 2.750.000 | - |
-
-## Tabeller
+## Features
 
 ### 📊 Tabel 1: Godkendte møder (indexeret)
 - Stacked bar: DGE (🔵) / SUP (🔴) / JUN (🟢)
 - Indbygger-justeret index (Midt = 100)
-- Viser detaljerede tal i expander
 
 ### 📊 Tabel 2A: Gruppestørrelse SUP (%)
 - 100% stacked bar - kun SUP-grupper
@@ -93,52 +49,74 @@ Klik "Download som PDF" for at få alle grafer som PDF
 - 100% stacked bar - alle grupper
 - Kategorier: 🔴 1-2 | 🟠 3-4 | 🟡 5-6 | 🟢 7-8 | ⚪ 9+
 
+### 📊 Tabel 6: Aktive grupper uden godkendte møder
+- Stacked bar: DGE (🔵) / SUP (🔴) / JUN (🟢)
+- Absolutte tal (ikke indexeret)
+
+### 📋 Tabel 7: Grupper med kun SGE-modul møder
+- Datatabel med Region | Gruppenavn | Antal møder
+- Sorteret efter region
+
+## Installation
+
+### Streamlit Cloud
+```bash
+# 1. Upload til GitHub:
+#    - app.py
+#    - requirements.txt
+
+# 2. Deploy på share.streamlit.io
+```
+
+### Lokal
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## Brug
+
+1. **Vælg mode**: 4 eller 5 regioner
+2. **Upload filer**: 8 eller 10 Excel-filer
+3. **Vælg år**: 2020-2025
+4. **Se analyser**: 7 tabeller
+5. **Download**:
+   - Grafer som HTML (ZIP)
+   - Data som Excel
+
+## Indbyggertal
+
+| Region | Indbyggere | Note |
+|--------|------------|------|
+| Nord | 600.000 | - |
+| **Midt** | **1.350.000** | **Base (index 100)** |
+| Syd | 1.250.000 | - |
+| Hovedstaden | 1.900.000 | 5-region mode |
+| Sjælland | 850.000 | 5-region mode |
+| Øst | 2.750.000 | 4-region mode |
+
 ## Data krav
 
-Se [DATAFORMAT.md](DATAFORMAT.md) for detaljeret guide
+### Groups file:
+- Region, Gruppe ID, Gruppenavn
+- Gruppetyper, Antal medlemmer, Status
 
-### Groups file (påkrævet kolonner):
-- Region
-- Gruppe ID
-- Gruppenavn
-- Gruppetyper (DGE/Supervision/Junior)
-- Antal medlemmer
+### Meetings file:
+- Region, Gruppe ID, Starttidspunkt
+- Status, Antal deltagere, Mødetype
 
-### Meetings file (påkrævet kolonner):
-- Region
-- Gruppe ID
-- Starttidspunkt
-- Status (skal være "Godkendt" for at tælle)
-- Antal deltagere
+## Teknisk
 
-## Region mapping
+**Dependencies:**
+```
+streamlit>=1.32.0
+pandas>=2.2.1
+numpy>=1.26.0
+plotly>=5.19.0
+openpyxl>=3.1.2
+python-dateutil>=2.8.2
+```
 
-| Excel fil indeholder | Mappes til |
-|---------------------|------------|
-| "Region Nordjylland" | Nord |
-| "Region Midtjylland" | Midt |
-| "Region Syddanmark" | Syd |
-| "Region Hovedstaden" | Hovedstaden |
-| "Region Sjælland" | Sjælland |
-| "Region Øst" | Øst |
+**Python:** 3.9+
 
-## Teknisk stack
-
-- **Python 3.9+**
-- **Streamlit** - Web interface
-- **Pandas** - Data manipulation
-- **Plotly** - Interactive charts
-- **ReportLab** - PDF generation
-- **Kaleido** - Chart to image export
-
-## Support
-
-Ved problemer:
-1. Tjek [DATAFORMAT.md](DATAFORMAT.md)
-2. Verificer fil-kolonner
-3. Tjek region-navne
-4. Se [CHANGELOG_v2.md](CHANGELOG_v2.md) for ændringer
-
-## Licens
-
-Udviklet til DGE regional analyse
+Se [DATAFORMAT.md](DATAFORMAT.md) for detaljeret guide.
